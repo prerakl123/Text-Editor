@@ -45,12 +45,104 @@ FILETYPES = [
     ("YAML Ain't Markup Language", ("*.yml", "*.yaml"))
 ]
 
+
+class LineNumberCanvas(Canvas):
+    def __init__(self, *args, **kwargs):
+        Canvas.__init__(self, *args, **kwargs)
+        self.text_widget = None
+        self.breakpoints = []
+
+    def connect(self, text_widget):
+        self.text_widget = text_widget
+
+    def re_render(self):
+        """Re-render the line canvas"""
+        self.delete('all') # To prevent drawing over the previous canvas
+
+        temp = self.text_widget.index("@0, 0")
+        while True :
+            dline= self.text_widget.dlineinfo(temp)
+            if dline is None: 
+                break
+            y = dline[1]
+            x = dline[0]
+            linenum = str(temp).split(".")[0]
+
+            id = self.create_text(2, y, anchor="nw", text=linenum, font='Consolas 13')
+
+            if int(linenum) in self.breakpoints:                
+                x1, y1, x2, y2 = self.bbox(id)
+                self.create_oval(x1, y1, x2, y2, fill='red')
+                self.tag_raise(id)
+
+            temp = self.text_widget.index("%s+1line" % temp)
+
+    def get_breakpoint_number(self,event):
+         if self.find_withtag('current'):
+            i = self.find_withtag('current')[0]
+            linenum = int(self.itemcget(i,'text'))
+
+            if linenum in self.breakpoints:
+                self.breakpoints.remove(linenum)
+            else:
+                self.breakpoints.append(linenum)
+            self.re_render()
+
+
+def mechanise():
+    content_text.tk.eval('''
+        proc widget_interceptor {widget command args} {
+
+            set orig_call [uplevel [linsert $args 0 $command]]
+
+          if {
+                ([lindex $args 0] == "insert") ||
+                ([lindex $args 0] == "delete") ||
+                ([lindex $args 0] == "replace") ||
+                ([lrange $args 0 2] == {mark set insert}) || 
+                ([lrange $args 0 1] == {xview moveto}) ||
+                ([lrange $args 0 1] == {xview scroll}) ||
+                ([lrange $args 0 1] == {yview moveto}) ||
+                ([lrange $args 0 1] == {yview scroll})} {
+
+                event generate  $widget <<Changed>>
+            }
+
+            #return original command
+            return $orig_call
+        }
+        ''')
+    content_text.tk.eval('''
+        rename {widget} new
+        interp alias {{}} ::{widget} {{}} widget_interceptor {widget} new
+    '''.format(widget=str(content_text)))
+    return
+
+
+def binding_keys():
+    for key in ['<Down>', '<Up>', "<<Changed>>", "<Configure>"]:
+        content_text.bind(key, changed)
+    linenumbers.bind('<Button-1>', linenumbers.get_breakpoint_number)
+    return
+
+
+def changed(event):
+    linenumbers.re_render()
+    return
+
+
 root = Tk()
 root.geometry('1200x620')
 root.title(PROGRAM_NAME)
 
-# show pop-up menu
+text_frame = Frame(root, highlightthickness=1, highlightbackground='black')
+content_text = Text(text_frame, wrap='word', undo=1, font='Consolas 13')
 
+linenumbers = LineNumberCanvas(text_frame, width=30)
+linenumbers.connect(content_text)
+linenumbers.pack(side=LEFT, fill=Y)
+
+# show pop-up menu
 
 def show_popup_menu(event):
     popup_menu.tk_popup(event.x_root, event.y_root)
@@ -71,20 +163,17 @@ def update_cursor_info_bar(event=None):
     cursor_info_bar.config(text=infotext)
 
 
+def update_sel_info_bar(event=None):
+    sel_length = len(content_text.get(SEL_FIRST, SEL_LAST))
+    sel_info_bar.config(text='Sel: {0} chars'.format(sel_length))
+
+
 def change_theme(event=None):
     selected_theme = theme_choice.get()
     fg_bg_colors = color_schemes.get(selected_theme)
     foreground_color, background_color = fg_bg_colors.split('.')
     content_text.config(
         background=background_color, fg=foreground_color)
-
-
-def update_line_numbers(event=None):
-    line_numbers = get_line_numbers()
-    line_number_bar.config(state='normal')
-    line_number_bar.delete('1.0', 'end')
-    line_number_bar.insert('1.0', line_numbers)
-    line_number_bar.config(state='disabled')
 
 
 def highlight_line(interval=100):
@@ -106,28 +195,20 @@ def toggle_highlight(event=None):
 
 
 def on_content_changed(event=None):
-    update_line_numbers()
-    update_cursor_info_bar()
-
-
-def get_line_numbers():
-    output = ''
-    if show_line_number.get():
-        row, col = content_text.index("end").split('.')
-        for i in range(1, int(row)):
-            output += str(i) + '\n'
-    return output
+    if event:
+        update_cursor_info_bar(event)
+    else:
+        update_cursor_info_bar()
 
 
 def display_about_messagebox(event=None):
     tkinter.messagebox.showinfo(
-        "About", "{}{}".format(PROGRAM_NAME, "\nText Editor\nprerakl123\nhttps://github.com/prerakl123"))
+        "About", "{}{}".format(PROGRAM_NAME, "\nText Editor\prerakl123\pratapslodhaa@gmail.com"))
 
 
 def display_help_messagebox(event=None):
     tkinter.messagebox.showinfo(
-        "Help", "Help Book: \n There is nothing much to be helped with. If any help required please visit"\
-                "https://github.com/prerakl123 and ask me there.",
+        "Help", "Help Book: \nText Editor\nprerakl123\npratapslodhaa@gmail.com",
         icon='question')
 
 
@@ -135,12 +216,6 @@ def exit_editor(event=None):
     if tkinter.messagebox.askokcancel("Quit?", "Do you want to QUIT for sure?\n Make sure you've saved your current work."):
         root.destroy()
 
-
-def toggle_word_wrap():
-    if word_wrap_value.get() < 1:
-        content_text.config(wrap=None)
-    else:
-        content_text.config(wrap=WORD)
 
 def new_file(event=None):
     root.title("Untitled")
@@ -316,10 +391,6 @@ menu_bar.add_cascade(label='Edit', menu=edit_menu)
 
 
 view_menu = Menu(menu_bar, tearoff=0)
-show_line_number = IntVar()
-show_line_number.set(1)
-view_menu.add_checkbutton(label='Show Line Number', variable=show_line_number,
-                          command=update_line_numbers)
 show_cursor_info = IntVar()
 show_cursor_info.set(1)
 view_menu.add_checkbutton(
@@ -344,9 +415,6 @@ theme_choice = StringVar()
 theme_choice.set('Default')
 for k in sorted(color_schemes):
     themes_menu.add_radiobutton(label=k, variable=theme_choice, command=change_theme)
-word_wrap_value = IntVar()
-word_wrap_value.set(1)
-view_menu.add_checkbutton(label='Word Wrap', variable=word_wrap_value, command=toggle_word_wrap)
 menu_bar.add_cascade(label='View', menu=view_menu)
 
 about_menu = Menu(menu_bar, tearoff=0)
@@ -367,29 +435,16 @@ for i, icon in enumerate(icons):
     tool_bar.image = tool_bar_icon
     tool_bar.pack(side='left')
 
-content_text = Text(root, wrap='word', undo=1, font=('Consolas', 11))
-scroll_bar = Scrollbar(root, cursor='arrow')
-line_number_bar = Text(root, width=4, padx=3, takefocus=0,  bd=0, yscrollcommand=scroll_bar.set, bg='DarkOliveGreen2',
-                       state=DISABLED,  wrap=NONE, font=('Consolas', 11))
-cursor_info_bar = Label(content_text, text='Line: 1 | Column: 1')
 
-
-def on_mwheel(event):
-    content_text.yview_scroll(int(-1*(event.delta/80)), "units")
-    line_number_bar.yview_scroll(int(-1*(event.delta/40)), "units")
-    
-    
-def y_view(*args):
-    content_text.yview(*args)
-    line_number_bar.yview(*args)
-    
-
-scroll_bar.config(command=y_view)
-line_number_bar.pack(side=LEFT,  fill=Y)
-scroll_bar.pack(side=RIGHT, fill=Y)
-content_text.pack(expand=YES, fill=BOTH)
+scroll_bar = Scrollbar(text_frame, command=content_text.yview, cursor='')
+cursor_info_bar = Label(content_text, text='Line: 1 | Column: 1', highlightthickness=1, highlightbackground='black')
+sel_info_bar = Label(content_text, text='From: 0 | To: 0', highlightthickness=1, highlightbackground='black')
+scroll_bar.pack(side='right', fill='y')
+text_frame.pack(expand='yes', fill='both')
+content_text.pack(expand='yes', fill='both')
 content_text.config(yscrollcommand=scroll_bar.set)
-cursor_info_bar.pack(expand=NO, fill=None, side=RIGHT, anchor=S+E)
+cursor_info_bar.pack(expand='no', fill=None, side='right', anchor='se')
+sel_info_bar.pack(expand='no', fill=None, side='right', anchor='se', padx=5)
 
 content_text.bind('<KeyPress-F1>', display_help_messagebox)
 content_text.bind('<Control-N>', new_file)
@@ -405,8 +460,22 @@ content_text.bind('<Control-a>', select_all)
 content_text.bind('<Control-y>', redo)
 content_text.bind('<Control-Y>', redo)
 content_text.bind('<Any-KeyPress>', on_content_changed)
-content_text.bind_all('<MouseWheel>', on_mwheel)
-line_number_bar.bind_all('<MouseWheel>', on_mwheel)
+
+
+def sel():
+    result = content_text.selection_get()
+    sel_info_bar.config(text='Sel: {0} chars'.format(len(result)))
+##    if result:
+##        content_text.tag_remove("sel", "sel.first", "sel.last-1c")
+##        content_text.tag_add("sel", "sel.first", "sel.last-1c")
+##        content_text.bind(SEL, update_sel_info_bar)
+    root.after(100, sel)
+
+
+content_text.bind('<Button-1>', lambda x: content_text.after(50, sel))
+for key in ['<Up>', '<Down>', '<Left>', '<Right>', '<Any-Key>', '<Button-1>', '<Button-2>', '<Button-3>']:
+    content_text.bind(key, update_cursor_info_bar)
+
 content_text.tag_configure('active_line', background='ivory2')
 
 # set up the pop-up menu
@@ -438,6 +507,8 @@ def fullscreen_cancel(event):
     root.wm_attributes('-topmost', 0)
 
 
+mechanise()
+binding_keys()
 root.bind('<F11>', fullscreen_toggle)
 root.bind('<Escape>', fullscreen_cancel)
 root.wm_state('zoomed')
