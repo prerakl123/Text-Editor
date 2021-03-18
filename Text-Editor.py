@@ -5,6 +5,8 @@ import os
 from tkinter import *
 import tkinter.filedialog
 import tkinter.messagebox
+import sys
+import enchant
 
 PROGRAM_NAME = "P-PAD"
 file_name = None
@@ -132,9 +134,6 @@ def changed(event):
 
 
 root = Tk()
-root.geometry('1200x620')
-root.title(PROGRAM_NAME)
-
 text_frame = Frame(root, highlightthickness=1, highlightbackground='black')
 content_text = Text(text_frame, wrap='word', undo=1, font='Consolas 13')
 
@@ -213,8 +212,13 @@ def display_help_messagebox(event=None):
 
 
 def exit_editor(event=None):
-    if tkinter.messagebox.askokcancel("Quit?", "Do you want to QUIT for sure?\n Make sure you've saved your current work."):
+    leaving = tkinter.messagebox.askyesnocancel("P-Pad", "Do you want to save your current work before quitting?")
+    if leaving is True:
         root.destroy()
+    elif leaving is False:
+        root.destroy()
+    elif leaving is None:
+        return
 
 
 def new_file(event=None):
@@ -346,6 +350,51 @@ def redo(event=None):
     on_content_changed()
     return 'break'
 
+    
+us_dict = enchant.Dict('EN_US')
+in_dict = enchant.Dict('EN_IN')
+
+
+def Spellcheck(event):
+    '''Spellcheck the word preceeding the insertion point'''
+    index = content_text.search(r'\s', "insert", backwards=True, regexp=True)
+    if index == "":
+        index ="1.0"
+    else:
+        index = content_text.index("%s+1c" % index)
+    word = content_text.get(index, "insert")
+    if us_dict.check(word) is True or in_dict.check(word) is True:
+        content_text.tag_remove("misspelled", index, "%s+%dc" % (index, len(word)))
+    else:
+        content_text.tag_add("misspelled", index, "%s+%dc" % (index, len(word)))
+
+
+def highlight_pattern(pattern, tag, start="1.0", end="end", regexp=False):
+    '''Apply the given tag to all text that matches the given pattern
+
+    If 'regexp' is set to True, pattern will be treated as a regular
+    expression according to Tcl's regular expression syntax.
+    '''
+    
+    start = self.index(start)
+    end = self.index(end)
+    self.mark_set("matchStart", start)
+    self.mark_set("matchEnd", start)
+    self.mark_set("searchLimit", end)
+
+    count = IntVar()
+    while True:
+        index = self.search(pattern, "matchEnd","searchLimit", count=count, regexp=regexp)
+        if index == "": break
+        if count.get() == 0: break # degenerate pattern which matches zero-length strings
+        self.mark_set("matchStart", index)
+        self.mark_set("matchEnd", "%s+%sc" % (index, count.get()))
+        self.tag_add(tag, "matchStart", "matchEnd")
+
+
+content_text.tag_configure("misspelled", foreground="red", underline=True)
+
+
 new_file_icon = PhotoImage(file='icons/new_file.png')
 open_file_icon = PhotoImage(file='icons/open_file.png')
 save_file_icon = PhotoImage(file='icons/save.png')
@@ -355,7 +404,9 @@ paste_icon = PhotoImage(file='icons/paste.png')
 undo_icon = PhotoImage(file='icons/undo.png')
 redo_icon = PhotoImage(file='icons/redo.png')
 
-menu_bar = Menu(root)
+
+menu_bar = Menu(root, tearoff=0)
+
 file_menu = Menu(menu_bar, tearoff=0)
 file_menu.add_command(label='New', accelerator='Ctrl+N', compound='left',
                       image=new_file_icon, underline=0, command=new_file)
@@ -368,6 +419,7 @@ file_menu.add_command(
 file_menu.add_separator()
 file_menu.add_command(label='Exit', accelerator='Alt+F4', command=exit_editor)
 menu_bar.add_cascade(label='File', menu=file_menu)
+
 
 edit_menu = Menu(menu_bar, tearoff=0)
 edit_menu.add_command(label='Undo', accelerator='Ctrl+Z',
@@ -417,6 +469,7 @@ for k in sorted(color_schemes):
     themes_menu.add_radiobutton(label=k, variable=theme_choice, command=change_theme)
 menu_bar.add_cascade(label='View', menu=view_menu)
 
+
 about_menu = Menu(menu_bar, tearoff=0)
 about_menu.add_command(label='About', command=display_about_messagebox)
 about_menu.add_command(label='Help', command=display_help_messagebox)
@@ -459,7 +512,8 @@ content_text.bind('<Control-A>', select_all)
 content_text.bind('<Control-a>', select_all)
 content_text.bind('<Control-y>', redo)
 content_text.bind('<Control-Y>', redo)
-content_text.bind('<Any-KeyPress>', on_content_changed)
+content_text.bind('<Any-Key>', on_content_changed)
+content_text.bind('<Any-KeyPress>', Spellcheck)
 
 
 def sel():
@@ -476,10 +530,10 @@ content_text.bind('<Button-1>', lambda x: content_text.after(50, sel))
 for key in ['<Up>', '<Down>', '<Left>', '<Right>', '<Any-Key>', '<Button-1>', '<Button-2>', '<Button-3>']:
     content_text.bind(key, update_cursor_info_bar)
 
-content_text.tag_configure('active_line', background='ivory2')
+content_text.tag_configure('active_line', background='grey75')
 
 # set up the pop-up menu
-popup_menu = Menu(content_text)
+popup_menu = Menu(content_text, tearoff=0)
 for i in ('cut', 'copy', 'paste', 'undo', 'redo'):
     cmd = eval(i)
     popup_menu.add_command(label=i, compound='left', command=cmd)
@@ -507,10 +561,22 @@ def fullscreen_cancel(event):
     root.wm_attributes('-topmost', 0)
 
 
-mechanise()
-binding_keys()
-root.bind('<F11>', fullscreen_toggle)
-root.bind('<Escape>', fullscreen_cancel)
-root.wm_state('zoomed')
-root.protocol('WM_DELETE_WINDOW', exit_editor)
-root.mainloop()
+if __name__ == '__main__':
+    root.geometry('1200x620')
+    root.title(PROGRAM_NAME)
+    mechanise()
+    binding_keys()
+    root.bind('<F11>', fullscreen_toggle)
+    root.bind('<Escape>', fullscreen_cancel)
+    root.wm_state('zoomed')
+    root.protocol('WM_DELETE_WINDOW', exit_editor)
+    try:
+        if sys.argv[1]:
+            with open(sys.argv[1], 'r') as f:
+                content_text.insert(END, f.read())
+    except Exception:
+        pass
+    root.mainloop()
+
+
+# MAYBE ADD A DICTIONARY MENU OPTION
